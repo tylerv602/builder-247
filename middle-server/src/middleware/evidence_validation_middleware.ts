@@ -1,30 +1,33 @@
 import { Request, Response, NextFunction } from 'express';
-import { validateEvidenceUniqueness } from '../utils/evidence_validation';
 import { Evidence } from '../types/evidence';
+import { evidenceValidator } from '../utils/evidence_validation';
 
-export function evidenceUniqueMiddleware(
-  existingEvidences: Evidence[] // This would typically come from a database
+export function createEvidenceValidationMiddleware(
+  existingEvidences: Evidence[] = []
 ) {
   return (req: Request, res: Response, next: NextFunction) => {
     const newEvidence: Evidence = req.body;
 
     try {
-      const validationResult = validateEvidenceUniqueness(newEvidence, existingEvidences);
+      const validationResult = evidenceValidator.validateUniqueness(
+        newEvidence, 
+        existingEvidences
+      );
 
       if (!validationResult.isUnique) {
         return res.status(409).json({
           error: 'Evidence is not unique',
-          reason: validationResult.duplicateReason,
-          validationDuration: validationResult.duration
+          ...validationResult
         });
       }
 
-      // If unique, attach validation result and proceed
-      req.evidenceValidation = validationResult;
+      // Attach validation result to request for downstream use
+      (req as any).evidenceValidation = validationResult;
       next();
     } catch (error) {
       res.status(400).json({
-        error: error instanceof Error ? error.message : 'Validation error'
+        error: 'Validation failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   };
