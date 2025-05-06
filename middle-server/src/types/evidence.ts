@@ -1,11 +1,14 @@
-/**
- * Evidence interface representing a piece of evidence with key attributes
- */
 export interface Evidence {
-  id: string;           // Unique identifier
-  type: string;         // Type of evidence
-  source: string;       // Source of the evidence
-  hash: string | null;  // Optional hash for additional uniqueness check
-  timestamp?: number;   // Optional timestamp
-  metadata?: Record<string, any>; // Optional additional metadata
+  id: string;
+  type: string;
+  source: string;
+  hash: string;
+  timestamp?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface EvidenceValidationResult {
+  isUnique: boolean;
+  reason?: string;
+  details?: Record<string, any>;
 }
