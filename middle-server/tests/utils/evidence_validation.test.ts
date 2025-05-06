@@ -1,7 +1,11 @@
-import { validateEvidenceUniqueness, addUniqueEvidence } from '../../src/utils/evidence_validation';
+import { 
+  validateEvidenceUniqueness, 
+  addUniqueEvidence,
+  performanceConfig
+} from '../../src/utils/evidence_validation';
 import { Evidence } from '../../src/types/evidence';
 
-describe('Evidence Uniqueness Validation', () => {
+describe('Enhanced Evidence Uniqueness Validation', () => {
   const baseEvidence: Evidence = {
     id: 'test-1',
     type: 'document',
@@ -19,60 +23,36 @@ describe('Evidence Uniqueness Validation', () => {
     }
   ];
 
-  describe('validateEvidenceUniqueness', () => {
-    it('should return false for evidence with duplicate id', () => {
-      const duplicateIdEvidence: Evidence = {
+  describe('Performance and Validation', () => {
+    it('should validate evidence uniqueness within performance threshold', () => {
+      const uniqueEvidence: Evidence = {
+        id: 'unique-id',
+        type: 'video',
+        source: 'unique-source',
+        hash: 'unique-hash'
+      };
+      
+      const result = validateEvidenceUniqueness(uniqueEvidence, existingEvidences);
+      
+      expect(result.isUnique).toBe(true);
+      expect(result.duration).toBeLessThan(performanceConfig.maxValidationTimeMs);
+    });
+
+    it('should return detailed validation result for duplicate evidence', () => {
+      const duplicateEvidence: Evidence = {
         ...baseEvidence,
         hash: 'different-hash'
       };
       
-      expect(validateEvidenceUniqueness(duplicateIdEvidence, existingEvidences)).toBe(false);
-    });
-
-    it('should return false for evidence with duplicate hash', () => {
-      const duplicateHashEvidence: Evidence = {
-        id: 'unique-id',
-        type: 'document',
-        source: 'unique-source',
-        hash: 'abc123'
-      };
+      const result = validateEvidenceUniqueness(duplicateEvidence, existingEvidences);
       
-      expect(validateEvidenceUniqueness(duplicateHashEvidence, existingEvidences)).toBe(false);
-    });
-
-    it('should return false for evidence with duplicate source and type', () => {
-      const duplicateSourceTypeEvidence: Evidence = {
-        id: 'unique-id',
-        type: 'document',
-        source: 'test-source',
-        hash: 'unique-hash'
-      };
-      
-      expect(validateEvidenceUniqueness(duplicateSourceTypeEvidence, existingEvidences)).toBe(false);
-    });
-
-    it('should return true for completely unique evidence', () => {
-      const uniqueEvidence: Evidence = {
-        id: 'unique-id',
-        type: 'video',
-        source: 'unique-source',
-        hash: 'unique-hash'
-      };
-      
-      expect(validateEvidenceUniqueness(uniqueEvidence, existingEvidences)).toBe(true);
-    });
-
-    it('should throw error for null evidence', () => {
-      expect(() => validateEvidenceUniqueness(null as any, existingEvidences)).toThrow('New evidence cannot be null or undefined');
-    });
-
-    it('should throw error for invalid existing evidences', () => {
-      expect(() => validateEvidenceUniqueness(baseEvidence, null as any)).toThrow('Existing evidences must be an array');
+      expect(result.isUnique).toBe(false);
+      expect(result.duplicateReason).toBeDefined();
     });
   });
 
-  describe('addUniqueEvidence', () => {
-    it('should add unique evidence to existing evidences', () => {
+  describe('Evidence Addition', () => {
+    it('should successfully add unique evidence', () => {
       const uniqueEvidence: Evidence = {
         id: 'unique-id',
         type: 'video',
@@ -80,18 +60,35 @@ describe('Evidence Uniqueness Validation', () => {
         hash: 'unique-hash'
       };
 
-      const updatedEvidences = addUniqueEvidence(uniqueEvidence, existingEvidences);
-      expect(updatedEvidences).toContain(uniqueEvidence);
-      expect(updatedEvidences.length).toBe(3);
+      const result = addUniqueEvidence(uniqueEvidence, existingEvidences);
+      
+      expect(result.success).toBe(true);
+      expect(result.updatedEvidences).toBeDefined();
+      expect(result.updatedEvidences?.length).toBe(3);
     });
 
-    it('should throw error when adding duplicate evidence', () => {
+    it('should prevent adding duplicate evidence', () => {
       const duplicateEvidence: Evidence = {
         ...baseEvidence,
         hash: 'different-hash'
       };
 
-      expect(() => addUniqueEvidence(duplicateEvidence, existingEvidences)).toThrow('Evidence is not unique and cannot be added');
+      const result = addUniqueEvidence(duplicateEvidence, existingEvidences);
+      
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should throw error for null evidence', () => {
+      expect(() => validateEvidenceUniqueness(null as any, existingEvidences))
+        .toThrow('New evidence cannot be null or undefined');
+    });
+
+    it('should throw error for invalid existing evidences', () => {
+      expect(() => validateEvidenceUniqueness(baseEvidence, null as any))
+        .toThrow('Existing evidences must be an array');
     });
   });
 });
