@@ -1,175 +1,107 @@
-import { Evidence } from '../types/evidence';
+import { Evidence, EvidenceValidationResult } from '../types/evidence';
 import { performance } from 'perf_hooks';
-import * as winston from 'winston';
 
-// Configure logging
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({ filename: 'evidence-validation.log' })
-  ]
-});
+export class EvidenceValidator {
+  private evidenceStore: Set<string>;
+  private maxCacheSize: number;
 
-// Simple in-memory LRU cache for evidence uniqueness
-class EvidenceCache {
-  private cache: Map<string, Evidence>;
-  private maxSize: number;
-
-  constructor(maxSize = 1000) {
-    this.cache = new Map();
-    this.maxSize = maxSize;
+  constructor(maxCacheSize = 1000) {
+    this.evidenceStore = new Set();
+    this.maxCacheSize = maxCacheSize;
   }
 
-  set(key: string, evidence: Evidence) {
-    if (this.cache.size >= this.maxSize) {
-      const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
-    }
-    this.cache.set(key, evidence);
-  }
+  /**
+   * Validate uniqueness of evidence
+   * @param evidence New evidence to validate
+   * @param existingEvidences List of existing evidences
+   * @returns Validation result
+   */
+  validateUniqueness(
+    evidence: Evidence, 
+    existingEvidences: Evidence[]
+  ): EvidenceValidationResult {
+    const startTime = performance.now();
 
-  get(key: string): Evidence | undefined {
-    return this.cache.get(key);
-  }
-
-  has(key: string): boolean {
-    return this.cache.has(key);
-  }
-}
-
-const evidenceCache = new EvidenceCache();
-
-/**
- * Validates the uniqueness of evidence with performance tracking and logging
- * @param newEvidence The new evidence to validate
- * @param existingEvidences List of existing evidence to check against
- * @returns Validation result with performance metrics
- */
-export function validateEvidenceUniqueness(
-  newEvidence: Evidence, 
-  existingEvidences: Evidence[]
-): { 
-  isUnique: boolean; 
-  duration: number; 
-  duplicateReason?: string 
-} {
-  const startTime = performance.now();
-
-  // Validate input
-  if (!newEvidence) {
-    logger.error('Null evidence validation attempt');
-    throw new Error('New evidence cannot be null or undefined');
-  }
-
-  if (!Array.isArray(existingEvidences)) {
-    logger.error('Invalid existing evidences type');
-    throw new Error('Existing evidences must be an array');
-  }
-
-  // Quick cache check
-  const cacheKey = newEvidence.id || `${newEvidence.source}:${newEvidence.type}`;
-  if (evidenceCache.has(cacheKey)) {
-    const duration = performance.now() - startTime;
-    logger.warn('Evidence already in cache', { 
-      evidenceId: newEvidence.id, 
-      duration 
-    });
-    return { 
-      isUnique: false, 
-      duration, 
-      duplicateReason: 'Cached' 
-    };
-  }
-
-  // Optimized uniqueness check with early return
-  for (const existingEvidence of existingEvidences) {
-    const isDuplicate = 
-      existingEvidence.id === newEvidence.id || 
-      (existingEvidence.hash && existingEvidence.hash === newEvidence.hash) ||
-      (existingEvidence.source === newEvidence.source && 
-       existingEvidence.type === newEvidence.type);
-
-    if (isDuplicate) {
-      const duration = performance.now() - startTime;
-      
-      // Log duplicate attempt
-      logger.warn('Evidence not unique', { 
-        newEvidence, 
-        existingEvidence, 
-        duration 
-      });
-
-      return { 
-        isUnique: false, 
-        duration, 
-        duplicateReason: 'Duplicate attributes match' 
+    // Input validation
+    if (!evidence) {
+      return {
+        isUnique: false,
+        reason: 'Invalid evidence: null or undefined',
+        details: { timestamp: Date.now() }
       };
     }
-  }
 
-  // Evidence is unique, add to cache
-  evidenceCache.set(cacheKey, newEvidence);
+    // Quick cache check
+    const uniqueKey = this.generateUniqueKey(evidence);
+    if (this.evidenceStore.has(uniqueKey)) {
+      return {
+        isUnique: false,
+        reason: 'Evidence already exists in cache',
+        details: { 
+          id: evidence.id, 
+          duration: performance.now() - startTime 
+        }
+      };
+    }
 
-  const duration = performance.now() - startTime;
-  logger.info('Evidence validated as unique', { 
-    evidenceId: newEvidence.id, 
-    duration 
-  });
+    // Check against existing evidences
+    const isDuplicate = existingEvidences.some(existing => 
+      existing.id === evidence.id ||
+      existing.hash === evidence.hash ||
+      (existing.source === evidence.source && existing.type === evidence.type)
+    );
 
-  return { 
-    isUnique: true, 
-    duration 
-  };
-}
+    const duration = performance.now() - startTime;
 
-/**
- * Adds new evidence to the list if unique, with detailed tracking
- * @param newEvidence The new evidence to add
- * @param existingEvidences List of existing evidence
- * @returns Detailed result of evidence addition
- */
-export function addUniqueEvidence(
-  newEvidence: Evidence, 
-  existingEvidences: Evidence[]
-): { 
-  success: boolean; 
-  updatedEvidences?: Evidence[]; 
-  error?: string 
-} {
-  const validationResult = validateEvidenceUniqueness(newEvidence, existingEvidences);
+    if (isDuplicate) {
+      return {
+        isUnique: false,
+        reason: 'Duplicate evidence detected',
+        details: { 
+          id: evidence.id, 
+          duration 
+        }
+      };
+    }
 
-  if (!validationResult.isUnique) {
-    logger.error('Cannot add non-unique evidence', { 
-      evidence: newEvidence, 
-      reason: validationResult.duplicateReason 
-    });
+    // Add to cache and return unique result
+    this.addToCache(uniqueKey);
 
     return {
-      success: false,
-      error: validationResult.duplicateReason || 'Evidence not unique'
+      isUnique: true,
+      details: { 
+        id: evidence.id, 
+        duration 
+      }
     };
   }
 
-  const updatedEvidences = [...existingEvidences, newEvidence];
-  
-  logger.info('Evidence added successfully', { 
-    evidenceId: newEvidence.id, 
-    totalEvidences: updatedEvidences.length 
-  });
+  /**
+   * Generate a unique key for evidence
+   */
+  private generateUniqueKey(evidence: Evidence): string {
+    return `${evidence.source}:${evidence.type}:${evidence.hash}`;
+  }
 
-  return {
-    success: true,
-    updatedEvidences
-  };
+  /**
+   * Add evidence to cache, managing max size
+   */
+  private addToCache(key: string): void {
+    if (this.evidenceStore.size >= this.maxCacheSize) {
+      // Remove oldest entry if cache is full
+      const oldestKey = Array.from(this.evidenceStore)[0];
+      this.evidenceStore.delete(oldestKey);
+    }
+    this.evidenceStore.add(key);
+  }
+
+  /**
+   * Clear the evidence cache
+   */
+  clearCache(): void {
+    this.evidenceStore.clear();
+  }
 }
 
-// Performance hints and configuration
-export const performanceConfig = {
-  maxValidationTimeMs: 50,
-  recommendedCacheSize: 1000
-};
+// Singleton instance for global use
+export const evidenceValidator = new EvidenceValidator();
